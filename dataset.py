@@ -205,6 +205,7 @@ class ExploreDataset(Dataset):
         prefiltering=False,
         random_permute=False,
         add_positional_encodings=False,
+         predict_final_answer=False,
         # Jiachen TODO: add your parameter here
         top_k_categories=5,
         num_egocentric_views=5,
@@ -226,6 +227,7 @@ class ExploreDataset(Dataset):
         self.action_memory = action_memory
         self.prefiltering = prefiltering
         self.random_permute = random_permute
+        self.predict_final_answer = predict_final_answer
         self.num_egocentric_views = num_egocentric_views
         self.top_k_categories = top_k_categories
 
@@ -424,7 +426,9 @@ class ExploreDataset(Dataset):
             multi_src_features.append(egocentric_features)
 
         text += f"Select the frontier/object that would help finding the answer of the question.\n"
-
+        if self.predict_final_answer:
+            text += "And give answer to the question after selection.\n"
+            
         if self.action_memory:
             try:
                 memory_text, memory_feature = prepare_action_memory(
@@ -612,8 +616,15 @@ class ExploreDataset(Dataset):
         prediction_index = np.where(prediction == 1.0)[0][0]
         if prediction_index < object_index:
             answer = f"object {prediction_index}"
+            # choosing an object/snapshot means agent should be able to answer the question
+            if self.predict_final_answer:
+                final_answer = episode["answer"]
+                answer += "\n" + final_answer
         else:
             answer = f"frontier {prediction_index - object_index}"
+            # When further exploration is needed, the agent can return Not sure instead
+            if self.predict_final_answer:
+                answer += "\nNot Sure"
 
         text += "Answer: "
         text += answer + self.tokenizer.eos_token

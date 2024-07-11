@@ -168,3 +168,5 @@ cython_debug/
 # other py files
 test.py
 unit_test.py
+cpu_train_demo.py
+dataset_demo.py

@@ -109,7 +109,7 @@ def train_one_epoch(dataloader, optimizer, llava_model, tokenizer, loss_fn, args
         labels[labels == tokenizer.pad_token_id] = -100
 
         # Jiachen TODO: check the content of your new prompt by uncommenting the following line
-        # print(tokenizer.decode(input_ids[0][input_ids[0] != tokenizer.pad_token_id]))
+        print(tokenizer.decode(input_ids[0][input_ids[0] != tokenizer.pad_token_id]))
         # print()
         # print(tokenizer.decode(labels[0][labels[0] != -100]))
 
@@ -295,6 +295,13 @@ def main():
         help="if set true, randomly permute object/frontiers/pre-filtering classes",
         default=False,
     )
+    # predict answer
+    parser.add_argument(
+        "--predict_final_answer",
+        action="store_true",
+        help="if set true, predict the final answer to the question",
+        default=False,
+    )
     parser.add_argument(
         "--seed",
         type=int,
@@ -344,6 +351,7 @@ def main():
         top_k_categories=args.top_k_categories,
         random_permute=args.random_permute,
         add_positional_encodings=args.add_positional_encodings,
+        predict_final_answer = args.predict_final_answer,
         tokenizer=tokenizer,
         max_length=2048,
     )
