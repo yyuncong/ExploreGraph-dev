@@ -139,6 +139,59 @@ def prepare_action_memory(memory_path):
     return text, memory_feature
 
 
+def prepare_object(
+    object_features,
+    object_classes,
+    keep_indices,
+    class2object,
+    # parameters for prefiltering
+    prefiltering,
+    ranking,
+    top_k,
+    # parameters for shuffle
+    shuffle,
+):
+    object_index = len(object_classes)
+    if prefiltering:
+        # 1. filter unseen object categories in ranking
+        ranking = [cls for cls in ranking if cls in class2object.keys()]
+        # print("seen ranking:", ranking)
+        # 2. take top k object categories
+        ranking = ranking[:top_k]
+        # print(f"top {self.top_k_categories} ranking:", ranking)
+        # 3. reformulate the object indices, classes and features
+        keep_indices = [
+            keep_indices[obj_idx] for cls in ranking for obj_idx in class2object[cls]
+        ]
+        object_classes = [cls for cls in ranking for _ in class2object[cls]]
+        object_features = [
+            object_features[obj_idx] for cls in ranking for obj_idx in class2object[cls]
+        ]
+        # Note that if apply prefiltering, we may have #(objects) < object_index
+        # 4. reassign object_index = #(object)
+        object_index = len(keep_indices)
+    if shuffle:
+        random_object_index = list(range(object_index))
+        np.random.shuffle(random_object_index)
+        keep_indices = [keep_indices[r_idx] for r_idx in random_object_index]
+        object_classes = [object_classes[r_idx] for r_idx in random_object_index]
+        object_features = [object_features[r_idx] for r_idx in random_object_index]
+
+    text = "These are the objects already in our scene graph:\n"
+    for i, class_name in enumerate(object_classes):
+        text += f"object {i} {class_name} <scene> "
+
+    if object_index == 0:
+        text += f"No object available "
+        # construct zero scene feature if all objects are missed
+        object_features = None
+    else:
+        object_features = torch.stack(object_features, dim=0)
+    text += "/\n"
+
+    return text, keep_indices, object_classes, object_features, object_index
+
+
 def prepare_frontier(feature_path, frontier_info):
     # print("frontier after shuffle", [info['rgb_id'] for info in frontier_info])
     try:
@@ -205,7 +258,7 @@ class ExploreDataset(Dataset):
         prefiltering=False,
         random_permute=False,
         add_positional_encodings=False,
-         predict_final_answer=False,
+        predict_final_answer=False,
         # Jiachen TODO: add your parameter here
         top_k_categories=5,
         num_egocentric_views=5,
@@ -426,9 +479,7 @@ class ExploreDataset(Dataset):
             multi_src_features.append(egocentric_features)
 
         text += f"Select the frontier/object that would help finding the answer of the question.\n"
-        if self.predict_final_answer:
-            text += "And give answer to the question after selection.\n"
-            
+
         if self.action_memory:
             try:
                 memory_text, memory_feature = prepare_action_memory(
@@ -485,6 +536,7 @@ class ExploreDataset(Dataset):
             index = np.random.choice(self.indices)
             return self.__getitem__(index)
 
+        """
         if self.prefiltering:
             # 1. filter unseen object categories in ranking
             ranking = [cls for cls in ranking if cls in class2object.keys()]
@@ -515,16 +567,9 @@ class ExploreDataset(Dataset):
             # shuffle the index if random_permute is True otherwise keep the original order
             random_object_index = list(range(object_index))
             np.random.shuffle(random_object_index)
-            # print(object_index)
-            # print('random_object_index', random_object_index)
-            # print('indices before shuffle', keep_indices)
-            # print('classes before shuffle', object_classes)
             keep_indices = [keep_indices[r_idx] for r_idx in random_object_index]
             object_classes = [object_classes[r_idx] for r_idx in random_object_index]
             object_features = [object_features[r_idx] for r_idx in random_object_index]
-            # object_positions = [object_positions[r_idx] for r_idx in random_object_index]
-            # print('indices after shuffle', keep_indices)
-            # print('classes after shuffle', object_classes)
 
         text += "These are the objects already in our scene graph:\n"
         for i, class_name in enumerate(object_classes):
@@ -542,7 +587,22 @@ class ExploreDataset(Dataset):
             # multi_src_positions.append(object_positions)
 
         text += "/\n"
-
+        """
+        object_text, keep_indices, object_classes, object_features, object_index = (
+            prepare_object(
+                object_features,
+                object_classes,
+                keep_indices,
+                class2object,
+                self.prefiltering,
+                ranking,
+                self.top_k_categories,
+                shuffle,
+            )
+        )
+        #print(f"Number of objects: {object_index} | {len(object_classes)}")
+        text += object_text
+        multi_src_features.append(object_features)
         """
         try:
             text += "Below are all the frontiers that we can explore:\n"
@@ -618,13 +678,12 @@ class ExploreDataset(Dataset):
             answer = f"object {prediction_index}"
             # choosing an object/snapshot means agent should be able to answer the question
             if self.predict_final_answer:
+                text += "After the selection, give your answer to the question.\n"
                 final_answer = episode["answer"]
                 answer += "\n" + final_answer
         else:
+            # When the agent needs further exploration, do not ask for the final answer
             answer = f"frontier {prediction_index - object_index}"
-            # When further exploration is needed, the agent can return Not sure instead
-            if self.predict_final_answer:
-                answer += "\nNot Sure"
 
         text += "Answer: "
         text += answer + self.tokenizer.eos_token
@@ -664,8 +723,8 @@ class ExploreDataset(Dataset):
         # remove scene graph id --- remove this if we need to keep id
 
         # make sure all things are included
-        # print("selection prompt", len(text))
-        # print(text)
+        #print("selection prompt", len(text))
+        #print(text)
         if self.max_length <= len(text):
             # print(text)
             self.too_many_objects_indices.add(idx)
